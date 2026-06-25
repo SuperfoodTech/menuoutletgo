@@ -101,7 +101,8 @@ def _edit_variants(page, token, group_id, variants):
             nama_baru = input("\n  Nama Variasi Baru (misal: Level Pedas): ").strip()
             if not nama_baru: continue
             
-            int_name = input("  Internal Name (opsional): ").strip()
+            int_name = input("  internal note (opsional): ").strip()
+            print("  (Keterangan: Min>0 berarti WAJIB. Max mengatur jumlah maksimum pilihan.)")
             min_q = input("  Minimal Pilih [1]: ").strip() or "1"
             max_q = input("  Maksimal Pilih [1]: ").strip() or "1"
             
@@ -209,7 +210,7 @@ def _edit_single_variant(page, token, group_id, variant, variants_list):
         print(f"  [1] Ubah nama variasi  : {v_nama}")
         print(f"  [2] Toggle status      : {aktif_str}")
         print(f"  [3] Edit opsi/pilihan  : {len(options)} opsi")
-        print(f"  [4] Edit aturan (Min/Max, Internal Name)")
+        print(f"  [4] Edit aturan (Min/Max, internal note)")
         print(f"  [5] ❌ Hapus Variasi Ini (DELETE)")
         print(f"  [0] Kembali")
         print()
@@ -255,8 +256,8 @@ def _edit_single_variant(page, token, group_id, variant, variants_list):
         elif sub == '4':
             print("\n  -- Edit Aturan Variasi --")
             int_name = variant.get('internal_name', '')
-            print(f"  Internal Name saat ini: {int_name}")
-            new_int = input("  Internal Name baru (kosong=tetap): ").strip()
+            print(f"  internal note saat ini: {int_name}")
+            new_int = input("  internal note baru (kosong=tetap): ").strip()
             
             rules = variant.get('rules', {})
             sel = rules.get('selection', {})
