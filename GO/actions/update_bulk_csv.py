@@ -10,42 +10,36 @@ def execute(page, merchant_id, api_headers):
         print("   ⚠️ Token atau UUID restoran belum tertangkap.")
         return
 
-    print("\n[*] Mengambil daftar menu untuk memilih Menu Group (Kategori)...")
-    data = api.fetch_menus(page, token, rest_uuid)
-    if data is None:
-        return
+    group_id = api_headers.get('v2_menus_group_id') or api_headers.get('menu_group_id')
 
-    categories = api.parse_menus(data)
-    if not categories:
-        print("   ⚠️ Tidak ada data menu ditemukan.")
-        return
+    if not group_id:
+        print("\n[*] Mendapatkan Menu Group ID via navigasi halaman menu...")
+        try:
+            menu_url = f"https://portal.gofoodmerchant.co.id/gofood/{merchant_id}/menu"
+            page.goto(menu_url, wait_until="domcontentloaded")
+            time.sleep(4)
+            group_id = api_headers.get('v2_menus_group_id') or api_headers.get('menu_group_id')
+        except Exception as e:
+            print(f"   ⚠️ Navigasi gagal: {e}")
 
-    groups = [(cat.get('name', 'Tanpa Nama'), cat.get('id')) for cat in categories if cat.get('id')]
+    if not group_id:
+        print("   ⚠️ Menu Group ID tidak ditemukan otomatis.")
+        group_id = input("   👉 Masukkan Menu Group ID (UUID) secara manual: ").strip()
+        if not group_id:
+            return
 
     while True:
         print("\n╔══════════════════════════════════════════════════╗")
         print("║        📝  UPDATE MENU VIA CSV (BULK)            ║")
         print("╚══════════════════════════════════════════════════╝")
-        print("  Pilih Kategori Menu untuk mendownload CSV:\n")
-        for i, (nama, gid) in enumerate(groups):
-            print(f"  [{i+1}] {nama}  (Group ID: {gid})")
-        print("  [q] Kembali\n")
-
-        pilih = input("  Pilihan: ").strip().lower()
-        if pilih == 'q':
+        print(f"  Menggunakan Menu Group ID: {group_id}\n")
+        
+        konfirm = input("  Tekan ENTER untuk mendownload CSV, atau [q] untuk batal: ").strip().lower()
+        if konfirm == 'q':
             break
 
-        try:
-            idx = int(pilih) - 1
-            if not (0 <= idx < len(groups)):
-                print("  ⚠️ Pilihan tidak valid.")
-                continue
-        except ValueError:
-            print("  ⚠️ Input tidak valid.")
-            continue
-
-        group_name, group_id = groups[idx]
-        print(f"\n[*] Mendownload CSV untuk kategori '{group_name}'...")
+        group_name = "Menu_Bulk"
+        print(f"\n[*] Mendownload CSV untuk Menu Group '{group_id}'...")
         
         result = api.download_bulk_csv(page, api_headers, group_id)
         if not result or 'error' in result:
