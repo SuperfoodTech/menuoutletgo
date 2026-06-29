@@ -62,13 +62,26 @@ def execute(page, merchant_id, api_headers):
     pending_changes = {}  # item_id -> modified payload dict
 
     while True:
+        # Siapkan penulisan CSV
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        csv_dir = os.path.join(base_dir, "src", "data")
+        os.makedirs(csv_dir, exist_ok=True)
+        csv_file_path = os.path.join(csv_dir, f"{merchant_id}_items.csv")
+        
+        csv_rows = []
+        header = ["No", "SID", "Category ID", "Category", "Item ID", "Item", "Description", "Total Sold", "Total Modifier Group", "Total Modifier", "Availability", "Current Real Price (Rp)", "Current Slash Price (Rp)"]
+        csv_rows.append(header)
+        
         print("\n╔══════════════════════════════════════════════════╗")
         print("║         🍽️  DAFTAR ITEM MENU GOFOOD              ║")
         print("╚══════════════════════════════════════════════════╝")
+        print(f"  {'No':<5} {'Status':<8} {'Nama Item':<35} {'Harga (Rp)':>12}  {'Kategori'}")
+        print("  " + "-"*80)
         for i, it_details in enumerate(all_items):
             orig_item = it_details['original_item']
             item_id = orig_item.get('common_id') or orig_item.get('id', '-')
             cat_name = it_details['category_name']
+            cat_id = it_details.get('category_common_id') or it_details.get('category_id', '-')
 
             display_item = orig_item
             is_pending = False
@@ -77,13 +90,42 @@ def execute(page, merchant_id, api_headers):
                 is_pending = True
 
             nama = display_item.get('name', 'Tanpa Nama')
+            desc = display_item.get('description', '').replace('\n', ' ').replace('\t', ' ')
             try:
                 harga = int(float(display_item.get('price') or 0))
             except (ValueError, TypeError):
                 harga = 0
-            aktif = "✅" if display_item.get('is_active', display_item.get('active', True)) else "❌"
+            
+            slash_price = int(float(display_item.get('original_price') or display_item.get('slashed_price') or 0))
+            avail = "Active" if display_item.get('is_active', display_item.get('active', True)) else "Inactive"
+            total_sold = display_item.get('total_sold', 0)
+            
+            variant_cats = display_item.get('variant_categories') or []
+            total_mod_group = len(display_item.get('variant_category_ids') or variant_cats)
+            total_mod = sum(len(vc.get('variants', [])) for vc in variant_cats) if variant_cats else 0
+            
+            pending_mark = "*" if is_pending else ""
+            idx_str = f"[{i+1}]{pending_mark}"
+            
+            # Print to terminal (Simple format)
+            aktif_icon = "✅" if avail == "Active" else "❌"
             pending_mark = "*" if is_pending else " "
-            print(f"  [{i+1:3d}] {pending_mark} {aktif} {nama:<35} Rp{harga:>10,}  [{cat_name}]")
+            nama_short = nama[:32] + "..." if len(nama) > 35 else nama
+            cat_short = cat_name[:20] + "..." if len(cat_name) > 23 else cat_name
+            
+            print(f"  [{i+1:3d}]{pending_mark} {aktif_icon:<5} {nama_short:<35} {harga:>12,}  [{cat_short}]")
+            
+            # Tambahkan ke baris CSV
+            csv_rows.append([idx_str, merchant_id, cat_id, cat_name, item_id, nama, desc, total_sold, total_mod_group, total_mod, avail, harga, slash_price])
+            
+        # Tulis ke file CSV
+        try:
+            with open(csv_file_path, mode='w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(csv_rows)
+            print(f"\n  💾 Data telah diekspor ke CSV: {csv_file_path}")
+        except Exception as e:
+            print(f"\n  ⚠️ Gagal menyimpan ke CSV: {e}")
 
         if pending_changes:
             print("\n  (Terdapat item bertanda * yang belum disimpan ke server)")

@@ -6,6 +6,35 @@ import random
 import getpass
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+import urllib.request
+import csv
+
+def get_credentials_from_sheet():
+    url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRYSUnKOqk29LCktTxdb0wPLbWMbRaWRP3eC_UA4AwYod1FW6zDMhtLMC5ghIvot2B8upCDfBsn-TCP/pub?gid=0&single=true&output=csv"
+    try:
+        print("[*] Mengambil data portal dari Google Sheet...")
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            lines = [l.decode('utf-8') for l in response.readlines()]
+            reader = csv.reader(lines)
+            data = list(reader)
+            
+            portals = []
+            for row in data[2:]:
+                if len(row) > 5 and row[1].strip():
+                    portal = row[1].strip()
+                    email = row[3].strip()
+                    password = row[5].strip()
+                    if email and password:
+                        portals.append({
+                            'portal': portal,
+                            'email': email,
+                            'password': password
+                        })
+            return portals
+    except Exception as e:
+        print(f"⚠️ Gagal mengambil data dari Google Sheet: {e}")
+        return []
 
 SESSION_DIR = Path(__file__).parent / "session"
 
@@ -51,22 +80,25 @@ def main():
     print("  🚀 GOFOOD MENU UPDATER")
     print("="*60)
     
-    sessions = get_saved_sessions()
+    portals = get_credentials_from_sheet()
     email = ""
-    if sessions:
-        print("\nProfil Tersimpan:")
-        for idx, sess in enumerate(sessions):
-            print(f"  [{idx+1}] {sess}")
-        print(f"  [n] Input Email Baru")
+    sheet_password = ""
+    
+    if portals:
+        print("\nDaftar Portal dari Google Sheet:")
+        for idx, p in enumerate(portals):
+            print(f"  [{idx+1}] {p['portal']} ({p['email']})")
+        print(f"  [n] Input Email Baru secara manual")
         
-        choice = input(f"\nPilih profil (1-{len(sessions)}/n): ").strip().lower()
+        choice = input(f"\nPilih portal (1-{len(portals)}/n): ").strip().lower()
         if choice == 'n':
             email = input("\nMasukkan Email Akun GoFood: ").strip()
         else:
             try:
                 idx = int(choice) - 1
-                if 0 <= idx < len(sessions):
-                    email = sessions[idx]
+                if 0 <= idx < len(portals):
+                    email = portals[idx]['email']
+                    sheet_password = portals[idx]['password']
             except ValueError:
                 pass
                 
@@ -104,10 +136,18 @@ def main():
         
         print("[*] Mengakses https://portal.gofoodmerchant.co.id/dashboard ...")
         page.goto("https://portal.gofoodmerchant.co.id/dashboard", wait_until="domcontentloaded")
-        time.sleep(2)
+        
+        # Tunggu sampai URL berubah dari dashboard (karena redirect ke login atau gofood)
+        try:
+            page.wait_for_url(lambda url: "/auth" in url or "login" in url or "/gofood" in url, timeout=10000)
+        except:
+            pass
+            
+        time.sleep(3)
+        print(f"   [Debug] URL setelah buka dashboard: {page.url}")
 
         # Cek apakah butuh login
-        if "/auth/login" in page.url:
+        if "/auth" in page.url or "login" in page.url:
             print("\n⚠️ Memulai proses login otomatis dengan Email & Password...")
             page.goto("https://portal.gofoodmerchant.co.id/auth/login/email", wait_until="domcontentloaded")
             time.sleep(2)
@@ -144,7 +184,12 @@ def main():
                         pass_input = page.locator('input[type="password"], input[name="password"]')
                         
                     if pass_input.count() > 0:
-                        password = getpass.getpass(f"\n🔑 Masukkan Password untuk {email}: ").strip()
+                        if sheet_password:
+                            password = sheet_password
+                            print(f"   🔑 Menggunakan password dari Google Sheet untuk {email}.")
+                        else:
+                            password = getpass.getpass(f"\n🔑 Masukkan Password untuk {email}: ").strip()
+                            
                         if not password:
                             print("⚠️ Password kosong. Menghentikan login.")
                             return
@@ -242,6 +287,13 @@ def main():
 
         print("\n[*] Mengakses halaman GoFood...")
         page.goto("https://portal.gofoodmerchant.co.id/gofood", wait_until="domcontentloaded")
+        
+        print("   [*] Melakukan double refresh halaman...")
+        time.sleep(2)
+        page.reload(wait_until="domcontentloaded")
+        time.sleep(2)
+        page.reload(wait_until="domcontentloaded")
+        
         print("\n[*] Mengambil daftar outlet (Merchant ID) langsung dari akun GoBiz...")
         outlets = []
 
@@ -296,9 +348,21 @@ def main():
                     
                 # Fetch data via API
                 payload_str = json.dumps({
+                    "query": [
+                        {
+                            "clauses": [
+                                {
+                                    "field": "applications.goresto.status",
+                                    "op": "equal",
+                                    "value": "active"
+                                }
+                            ],
+                            "op": "and"
+                        }
+                    ],
                     "from": 0,
                     "size": 1000,
-                    "_source": ["id", "outlet_name", "merchant_name", "outlet_address", "applications"]
+                    "sort": ["outlet_name"]
                 })
                 
                 api_response = page.evaluate("""async ({token, payload}) => {
@@ -381,7 +445,12 @@ def main():
         merchant_id = ""
         if not outlets:
             print("\n⚠️ Tidak ada data outlet yang berhasil diambil dari akun GoBiz.")
-            merchant_id = input("\n👉 Masukkan Merchant ID secara manual (contoh: G828092803): ").strip()
+            print("⏳ Menunggu di dashboard. Silakan lakukan aktivitas secara manual, atau tutup browser jika sudah selesai...")
+            try:
+                page.wait_for_event("close", timeout=0)
+            except Exception:
+                pass
+            return
         else:
             print("\n" + "="*60)
             print("PILIH OUTLET UNTUK DIUPDATE:")
@@ -393,24 +462,19 @@ def main():
                     name = f"{name} - {cabang_short}"
                 m_id = outlet.get('store_id', 'Tidak Ada ID')
                 print(f"  [{idx+1}] {name} (ID: {m_id})")
-            print("  [m] Input Merchant ID secara manual")
             print("="*60)
 
-            pilih = input(f"\nPilihan (1-{len(outlets)}/m): ").strip().lower()
-            if pilih == 'm':
-                merchant_id = input("\n👉 Masukkan Merchant ID secara manual: ").strip()
-            else:
-                try:
-                    idx = int(pilih) - 1
-                    if 0 <= idx < len(outlets):
-                        merchant_id = outlets[idx].get('store_id', '').strip()
-                        if not merchant_id:
-                            print("⚠️ Merchant ID tidak ditemukan untuk outlet ini. Meminta input manual...")
-                            merchant_id = input("\n👉 Masukkan Merchant ID secara manual: ").strip()
-                    else:
-                        print("⚠️ Pilihan tidak valid.")
-                except ValueError:
-                    print("⚠️ Input tidak valid.")
+            pilih = input(f"\nPilihan (1-{len(outlets)}): ").strip().lower()
+            try:
+                idx = int(pilih) - 1
+                if 0 <= idx < len(outlets):
+                    merchant_id = outlets[idx].get('store_id', '').strip()
+                    if not merchant_id:
+                        print("⚠️ Merchant ID tidak ditemukan untuk outlet ini.")
+                else:
+                    print("⚠️ Pilihan tidak valid.")
+            except ValueError:
+                print("⚠️ Input tidak valid.")
 
         if merchant_id:
             if not merchant_id.startswith("G"):

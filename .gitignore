@@ -31,3 +31,4 @@ downloads/
 test_*.py
 scratch/
 EOF
+src/data/*.csv
